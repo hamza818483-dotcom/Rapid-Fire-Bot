@@ -3,7 +3,6 @@ import json
 import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional
-import pandas as pd
 from fpdf import FPDF
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler

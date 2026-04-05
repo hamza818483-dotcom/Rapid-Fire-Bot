@@ -6,9 +6,6 @@ from typing import Dict, List, Optional
 from fpdf import FPDF
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
-from flask import Flask
-from threading import Thread
-
 # ==================== কনফিগারেশন ====================
 TOKEN = os.environ.get('BOT_TOKEN', "")
 if not TOKEN:

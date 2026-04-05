@@ -1,0 +1,4 @@
+python-telegram-bot==20.7
+pandas==2.1.0
+fpdf==1.7.2
+flask==2.3.0

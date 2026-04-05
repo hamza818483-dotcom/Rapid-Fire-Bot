@@ -1,3 +1,2 @@
 python-telegram-bot==20.7
 fpdf==1.7.2
-flask==2.3.0

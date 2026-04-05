@@ -234,13 +234,12 @@ async def rapid(update: Update, context: CallbackContext):
         active_quiz.user_id = user_id
         
         job_queue = context.application.job_queue
-        job = job_queue.run_repeating(
+        job_queue.run_repeating(
             send_next_question,
             interval=interval,
             first=0,
             data={'quiz': active_quiz}
         )
-        active_quiz.job = job
         
         await update.message.reply_text(
             f"🎯 *কুইজ শুরু!*\n\n"
@@ -349,6 +348,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_callback))
     
     print("🤖 Rapid Fire Quiz Bot is running on Render...")
+    print(f"Bot token loaded: {'Yes' if TOKEN else 'No'}")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":

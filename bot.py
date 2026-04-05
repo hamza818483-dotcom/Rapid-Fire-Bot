@@ -1,11 +1,13 @@
 import os
 import json
+import csv
 import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional
 from fpdf import FPDF
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
+
 # ==================== কনফিগারেশন ====================
 TOKEN = os.environ.get('BOT_TOKEN', "")
 if not TOKEN:
@@ -15,16 +17,6 @@ if not TOKEN:
 DATA_FILE = "quiz_data.json"
 QUIZZES_FILE = "active_quizzes.json"
 
-# Flask app for keeping bot alive
-flask_app = Flask('')
-
-@flask_app.route('/')
-def home():
-    return "🤖 Rapid Fire Quiz Bot is running!"
-
-def run_flask():
-    flask_app.run(host='0.0.0.0', port=8080)
-
 # ==================== ডাটা স্ট্রাকচার ====================
 class Question:
     def __init__(self, data):
@@ -32,7 +24,7 @@ class Question:
         self.options = []
         for i in range(1, 6):
             opt = data.get(f'option{i}', '')
-            if opt and str(opt) != 'nan':
+            if opt and opt != '':
                 self.options.append(str(opt))
         self.answer = str(data.get('answer', ''))
         self.explanation = str(data.get('explanation', ''))
@@ -128,29 +120,19 @@ async def handle_csv(update: Update, context: CallbackContext):
     await file.download_to_drive(file_path)
     
     try:
-        # Try different encodings
-        try:
-            df = pd.read_csv(file_path, encoding='utf-8')
-        except:
-            df = pd.read_csv(file_path, encoding='latin-1')
-        
         questions = []
-        for _, row in df.iterrows():
-            q_data = {}
-            for col in df.columns:
-                val = row[col]
-                if pd.notna(val):
-                    q_data[col] = str(val)
-                else:
-                    q_data[col] = ''
-            
-            questions.append(Question(q_data))
+        with open(file_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                q_data = {}
+                for col in reader.fieldnames:
+                    q_data[col] = row.get(col, '')
+                questions.append(Question(q_data))
         
         if len(questions) == 0:
             await update.message.reply_text("❌ CSV ফাইলে কোনো প্রশ্ন পাওয়া যায়নি!")
             return
         
-        # ইউজারের ডাটা সেভ করুন
         user_data = load_data()
         user_data['quizzes'][str(update.effective_user.id)] = {
             'questions': [(q.question, q.options, q.answer, q.explanation) for q in questions],
@@ -159,7 +141,6 @@ async def handle_csv(update: Update, context: CallbackContext):
         }
         save_data(user_data)
         
-        # কীবোর্ড বাটন তৈরি
         keyboard = [
             [InlineKeyboardButton("✅ অপশন সহ পাঠান", callback_data=f"send_with_opts_{update.effective_user.id}")],
             [InlineKeyboardButton("📝 অপশন ছাড়া পাঠান", callback_data=f"send_without_opts_{update.effective_user.id}")]
@@ -175,40 +156,32 @@ async def handle_csv(update: Update, context: CallbackContext):
         )
         
     except Exception as e:
-        await update.message.reply_text(f"❌ CSV পড়তে সমস্যা: {str(e)}\n\nসঠিক ফরম্যাট নিশ্চিত করুন।")
+        await update.message.reply_text(f"❌ CSV পড়তে সমস্যা: {str(e)}")
     finally:
         if os.path.exists(file_path):
             os.remove(file_path)
 
 async def button_callback(update: Update, context: CallbackContext):
-    """বাটন ক্লিক হ্যান্ডলার"""
     query = update.callback_query
     await query.answer()
     
     data = query.data
     if data.startswith("send_with_opts_"):
-        user_id = data.split("_")[-1]
         context.user_data['send_options'] = True
-        context.user_data['stored_user_id'] = user_id
         await query.edit_message_text(
             "✅ *অপশন সহ* পাঠানো হবে।\n\n"
-            "এখন `/rapid -t আপনার_টপিক -c চ্যানেল_আইডি [-i সময়]` কমান্ড দিন।\n\n"
-            "উদাহরণ: `/rapid -t বাংলাদেশ -c @your_channel -i 30`",
+            "এখন `/rapid -t আপনার_টপিক -c চ্যানেল_আইডি [-i সময়]` কমান্ড দিন।",
             parse_mode='Markdown'
         )
     elif data.startswith("send_without_opts_"):
-        user_id = data.split("_")[-1]
         context.user_data['send_options'] = False
-        context.user_data['stored_user_id'] = user_id
         await query.edit_message_text(
             "✅ *অপশন ছাড়া* পাঠানো হবে।\n\n"
-            "এখন `/rapid -t আপনার_টপিক -c চ্যানেল_আইডি [-i সময়]` কমান্ড দিন।\n\n"
-            "উদাহরণ: `/rapid -t বাংলাদেশ -c @your_channel -i 30`",
+            "এখন `/rapid -t আপনার_টপিক -c চ্যানেল_আইডি [-i সময়]` কমান্ড দিন।",
             parse_mode='Markdown'
         )
 
 async def rapid(update: Update, context: CallbackContext):
-    """/rapid -t topic -c channel_id [-i interval]"""
     try:
         args = ' '.join(context.args).split()
         topic = None
@@ -229,25 +202,19 @@ async def rapid(update: Update, context: CallbackContext):
         if not topic or not channel_id:
             await update.message.reply_text(
                 "❌ *সঠিক ফরম্যাট ব্যবহার করুন:*\n\n"
-                "`/rapid -t টপিক_নাম -c চ্যানেল_আইডি [-i সেকেন্ড]`\n\n"
-                "উদাহরণ:\n"
-                "`/rapid -t বাংলাদেশ -c @my_channel -i 30`",
+                "`/rapid -t টপিক_নাম -c চ্যানেল_আইডি [-i সেকেন্ড]`",
                 parse_mode='Markdown'
             )
             return
         
         user_data = load_data()
-        user_quizzes = user_data.get('quizzes', {})
         user_id = str(update.effective_user.id)
         
-        if user_id not in user_quizzes:
-            await update.message.reply_text(
-                "❌ *কোনো CSV ফাইল পাওয়া যায়নি!*\n\n"
-                "দয়া করে আগে একটি CSV ফাইল আপলোড করুন।"
-            )
+        if user_id not in user_data.get('quizzes', {}):
+            await update.message.reply_text("❌ আগে একটি CSV ফাইল আপলোড করুন।")
             return
         
-        questions_data = user_quizzes[user_id]['questions']
+        questions_data = user_data['quizzes'][user_id]['questions']
         questions = []
         for q_data in questions_data:
             q = Question({
@@ -261,8 +228,7 @@ async def rapid(update: Update, context: CallbackContext):
         send_options = context.user_data.get('send_options', True)
         
         if not channel_id.startswith('@') and not channel_id.startswith('-100'):
-            if not channel_id.startswith('-'):
-                channel_id = f"@{channel_id}"
+            channel_id = f"@{channel_id}"
         
         active_quiz = ActiveQuiz(topic, channel_id, interval, questions, send_options)
         active_quiz.user_id = user_id
@@ -272,34 +238,16 @@ async def rapid(update: Update, context: CallbackContext):
             send_next_question,
             interval=interval,
             first=0,
-            data={
-                'chat_id': update.effective_chat.id,
-                'quiz': active_quiz,
-                'user_id': user_id
-            }
+            data={'quiz': active_quiz}
         )
         active_quiz.job = job
         
-        active_quizzes = load_active_quizzes()
-        active_quizzes[str(update.effective_chat.id)] = {
-            'topic': topic,
-            'channel_id': channel_id,
-            'interval': interval,
-            'total_questions': len(questions),
-            'send_options': send_options,
-            'start_time': datetime.now().isoformat(),
-            'user_id': user_id
-        }
-        save_active_quizzes(active_quizzes)
-        
         await update.message.reply_text(
             f"🎯 *কুইজ শুরু!*\n\n"
-            f"📚 টপিক: `{topic}`\n"
-            f"📺 চ্যানেল: `{channel_id}`\n"
-            f"⏱️ ব্যবধান: `{interval}` সেকেন্ড\n"
-            f"❓ মোট প্রশ্ন: `{len(questions)}`\n"
-            f"📝 ফরম্যাট: `{'অপশন সহ' if send_options else 'অপশন ছাড়া'}`\n\n"
-            f"✅ প্রথম প্রশ্ন পাঠানো হচ্ছে...",
+            f"📚 টপিক: {topic}\n"
+            f"📺 চ্যানেল: {channel_id}\n"
+            f"⏱️ ব্যবধান: {interval} সেকেন্ড\n"
+            f"❓ মোট প্রশ্ন: {len(questions)}",
             parse_mode='Markdown'
         )
         
@@ -307,7 +255,6 @@ async def rapid(update: Update, context: CallbackContext):
         await update.message.reply_text(f"❌ ত্রুটি: {str(e)}")
 
 async def send_next_question(ctx: CallbackContext):
-    """পরবর্তী প্রশ্ন পাঠান"""
     job_data = ctx.job.data
     quiz = job_data['quiz']
     
@@ -327,10 +274,9 @@ async def send_next_question(ctx: CallbackContext):
         )
         quiz.current_index += 1
     except Exception as e:
-        print(f"প্রশ্ন পাঠাতে সমস্যা: {e}")
+        print(f"Error sending question: {e}")
 
 async def generate_solve_sheet(ctx: CallbackContext, quiz: ActiveQuiz):
-    """সলভ শীট PDF জেনারেট করুন"""
     try:
         pdf = FPDF()
         pdf.add_page()
@@ -363,52 +309,34 @@ async def generate_solve_sheet(ctx: CallbackContext, quiz: ActiveQuiz):
                 chat_id=quiz.user_id,
                 document=f,
                 filename=pdf_filename,
-                caption=f"✅ কুইজ সম্পন্ন! মোট প্রশ্ন: {len(quiz.questions)}"
+                caption=f"✅ কুইজ সম্পন্ন!"
             )
         
         os.remove(pdf_filename)
         
     except Exception as e:
-        print(f"PDF জেনারেট করতে সমস্যা: {e}")
-
-async def gensheet(update: Update, context: CallbackContext):
-    """উত্তরপত্র তৈরি করুন"""
-    await update.message.reply_text("📝 উত্তরপত্র তৈরি হচ্ছে... দয়া করে অপেক্ষা করুন।")
-    await update.message.reply_text("ℹ️ কুইজ শেষ হলে PDF auto-generate হবে।")
+        print(f"PDF generation error: {e}")
 
 async def cancel_rapid(update: Update, context: CallbackContext):
-    """চলমান কুইজ বন্ধ করুন"""
-    chat_id = str(update.effective_chat.id)
-    active_quizzes = load_active_quizzes()
-    
-    if chat_id in active_quizzes:
-        current_jobs = context.application.job_queue.jobs()
-        for job in current_jobs:
-            if job.data and job.data.get('chat_id') == chat_id:
-                job.schedule_removal()
-        
-        del active_quizzes[chat_id]
-        save_active_quizzes(active_quizzes)
-        await update.message.reply_text("✅ চলমান কুইজ বন্ধ করা হয়েছে।")
-    else:
-        await update.message.reply_text("❌ এই চ্যাটে কোন সক্রিয় কুইজ নেই।")
+    jobs = context.application.job_queue.jobs()
+    for job in jobs:
+        if job.data and job.data.get('quiz'):
+            job.schedule_removal()
+    await update.message.reply_text("✅ চলমান কুইজ বন্ধ করা হয়েছে।")
+
+async def gensheet(update: Update, context: CallbackContext):
+    await update.message.reply_text("📝 কুইজ শেষ হলে PDF auto-generate হবে।")
 
 async def restart(update: Update, context: CallbackContext):
     await update.message.reply_text("🔄 বট রিস্টার্ট হচ্ছে...")
 
 async def get_log(update: Update, context: CallbackContext):
-    await update.message.reply_text("📋 বট সচল আছে। লগ দেখতে Render Dashboard দেখুন।")
+    await update.message.reply_text("📋 বট সচল আছে।")
 
 # ==================== মেইন ফাংশন ====================
 def main():
-    # Flask thread start
-    thread = Thread(target=run_flask)
-    thread.start()
-    
-    # Bot start
     app = Application.builder().token(TOKEN).build()
     
-    # Add handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ping", ping))
     app.add_handler(CommandHandler("rapid", rapid))
@@ -421,9 +349,6 @@ def main():
     app.add_handler(CallbackQueryHandler(button_callback))
     
     print("🤖 Rapid Fire Quiz Bot is running on Render...")
-    print(f"Bot token loaded: {'Yes' if TOKEN else 'No'}")
-    
-    # Run bot
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":

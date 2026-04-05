@@ -1,0 +1,11 @@
+services:
+  - type: worker
+    name: rapid-fire-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+    plan: free
+    pythonVersion: 3.11.0

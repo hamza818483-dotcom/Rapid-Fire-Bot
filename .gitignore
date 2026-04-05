@@ -1,0 +1,7 @@
+*.pyc
+__pycache__/
+*.json
+temp_*.csv
+solve_sheet_*.pdf
+.env
+venv/
